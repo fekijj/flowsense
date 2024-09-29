@@ -72,13 +72,13 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
-    <LibraryPath>$(DXSDK_Dir)\Lib\x86;$(SolutionDir)Airflow\additionals\minhook;$(SolutionDir)Airflow\additionals\freetype\objs\Win32\Debug Static;D:\June 2010 SDK\Lib\x86;$(LibraryPath)</LibraryPath>
-    <IncludePath>$(DXSDK_Dir)\Include;$(SolutionDir)\Airflow\additionals\freetype\include;D:\June 2010 SDK\Include;$(IncludePath)</IncludePath>
+    <LibraryPath>$(DXSDK_Dir)\Lib\x86;$(SolutionDir)flowsense\additionals\minhook;$(SolutionDir)flowsense\additionals\freetype\objs\Win32\Debug Static;D:\June 2010 SDK\Lib\x86;$(LibraryPath)</LibraryPath>
+    <IncludePath>$(DXSDK_Dir)\Include;$(SolutionDir)\flowsense\additionals\freetype\include;D:\June 2010 SDK\Include;$(IncludePath)</IncludePath>
     <TargetName>csgo-legacy-debug</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
-    <LibraryPath>$(DXSDK_Dir)\Lib\x86;$(SolutionDir)\Airflow\additionals\freetype\objs;$(SolutionDir)\Airflow\additionals\minhook;$(LibraryPath)</LibraryPath>
-    <IncludePath>$(DXSDK_Dir)\Include;$(SolutionDir)\Airflow\additionals\freetype\include;$(IncludePath)</IncludePath>
+    <LibraryPath>$(DXSDK_Dir)\Lib\x86;$(SolutionDir)\flowsense\additionals\freetype\objs;$(SolutionDir)\flowsense\additionals\minhook;$(LibraryPath)</LibraryPath>
+    <IncludePath>$(DXSDK_Dir)\Include;$(SolutionDir)\flowsense\additionals\freetype\include;$(IncludePath)</IncludePath>
     <TargetName>csgo-legacy</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
