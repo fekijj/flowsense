@@ -610,209 +610,137 @@ namespace cheat_tools
 
 namespace resolver
 {
-  // reference:
-  // https://github.com/cybergodjsp/bameware-source/blob/master/FEATURES/Resolver.cpp#L74
-  __forceinline void store_freestanding( c_csplayer* player, records_t* current )
-  {
-    auto& resolver_info = info [ player->index( ) ];
-
-    auto& freestanding = resolver_info.freestanding;
-    freestanding.available = false;
-
-    if( current->velocity.length( true ) > 0.1f && !current->fake_walking )
-      return;
-
-    float at_target = math::normalize( math::angle_from_vectors( g_ctx.local->origin( ), player->origin( ) ).y );
-
-    const float height = 64.f;
-
-    vector3d direction_1, direction_2;
-    math::angle_to_vectors( vector3d( 0.f, at_target - 90.f, 0.f ), direction_1 );
-    math::angle_to_vectors( vector3d( 0.f, at_target + 90.f, 0.f ), direction_2 );
-
-    const auto left_eye_pos = player->origin( ) + vector3d( 0, 0, height ) + ( direction_1 * 16.f );
-    const auto right_eye_pos = player->origin( ) + vector3d( 0, 0, height ) + ( direction_2 * 16.f );
-
-    freestanding.left_damage = g_auto_wall->fire_bullet( g_ctx.local, player, g_ctx.weapon_info, g_ctx.weapon->is_taser( ), g_ctx.eye_position, left_eye_pos ).dmg;
-
-    freestanding.right_damage = g_auto_wall->fire_bullet( g_ctx.local, player, g_ctx.weapon_info, g_ctx.weapon->is_taser( ), g_ctx.eye_position, right_eye_pos ).dmg;
-
-    c_game_trace trace = { };
-    c_trace_filter_world_only filter = { };
-
-    interfaces::engine_trace->trace_ray( ray_t( left_eye_pos, g_ctx.eye_position ), mask_all, &filter, &trace );
-    freestanding.left_fraction = trace.fraction;
-
-    interfaces::engine_trace->trace_ray( ray_t( right_eye_pos, g_ctx.eye_position ), mask_all, &filter, &trace );
-    freestanding.right_fraction = trace.fraction;
-
-    freestanding.available = true;
-  }
-
-  void start( c_csplayer* player, records_t* current )
-  {
-    auto& resolver_info = info [ player->index( ) ];
-    resolver_info.valid = false;
-
-    if( !g_cfg.rage.enable || !g_ctx.local->is_alive( ) )
+    __forceinline void store_freestanding(c_csplayer* player, records_t* current)
     {
-      if( resolver_info.valid )
-        resolver_info.reset( );
+        auto& resolver_info = info[player->index()];
+        auto& freestanding = resolver_info.freestanding;
 
-      return;
+        freestanding.available = false;
+        if (current->velocity.length(true) > 0.1f && !current->fake_walking) return;
+
+        float at_target = math::normalize(math::angle_from_vectors(g_ctx.local->origin(), player->origin()).y);
+        const float height = 64.f;
+
+        vector3d direction_1, direction_2;
+        math::angle_to_vectors(vector3d(0.f, at_target - 90.f, 0.f), direction_1);
+        math::angle_to_vectors(vector3d(0.f, at_target + 90.f, 0.f), direction_2);
+
+        const auto left_eye_pos = player->origin() + vector3d(0, 0, height) + (direction_1 * 16.f);
+        const auto right_eye_pos = player->origin() + vector3d(0, 0, height) + (direction_2 * 16.f);
+
+        freestanding.left_damage = g_auto_wall->fire_bullet(g_ctx.local, player, g_ctx.weapon_info, g_ctx.weapon->is_taser(), g_ctx.eye_position, left_eye_pos).dmg;
+        freestanding.right_damage = g_auto_wall->fire_bullet(g_ctx.local, player, g_ctx.weapon_info, g_ctx.weapon->is_taser(), g_ctx.eye_position, right_eye_pos).dmg;
+
+        c_game_trace trace{};
+        c_trace_filter_world_only filter{};
+
+        interfaces::engine_trace->trace_ray(ray_t(left_eye_pos, g_ctx.eye_position), mask_all, &filter, &trace);
+        freestanding.left_fraction = trace.fraction;
+
+        interfaces::engine_trace->trace_ray(ray_t(right_eye_pos, g_ctx.eye_position), mask_all, &filter, &trace);
+        freestanding.right_fraction = trace.fraction;
+
+        freestanding.available = true;
     }
 
-    if( player->is_bot( ) )
-      return;
-
-    auto state = player->animstate( );
-    if( !state )
-      return;
-
-    store_freestanding( player, current );
-
-    float at_target = math::normalize( math::angle_from_vectors( g_ctx.local->origin( ), player->origin( ) ).y );
-    int misses = g_rage_bot->missed_shots [ player->index( ) ];
-
-    auto& lby_data = resolver_info.lby;
-
-    if( !current->on_ground )
+    void start(c_csplayer* player, records_t* current)
     {
-      if( misses < 1 )
-      {
-        player->eye_angles( ).y = at_target;
-        resolver_info.mode = xor_str( "air" );
-      }
-      else
-      {
-        float velyaw = math::rad_to_deg( std::atan2( current->velocity.y, current->velocity.x ) );
+        auto& resolver_info = info[player->index()];
+        resolver_info.valid = false;
 
-        switch( misses % 3 )
+        if (!g_cfg.rage.enable || !g_ctx.local->is_alive())
         {
-        case 1:
-          player->eye_angles( ).y = velyaw + 180.f;
-          break;
-        case 2:
-          player->eye_angles( ).y = velyaw - 90.f;
-          break;
-        case 0:
-          player->eye_angles( ).y = velyaw + 90.f;
-          break;
+            if (resolver_info.valid) resolver_info.reset();
+            return;
         }
 
-        resolver_info.mode = xor_str( "air brute" );
-      }
+        if (player->is_bot()) return;
 
-      float lby = player->lby( );
+        auto state = player->animstate();
+        if (!state) return;
 
-      lby_data.lby_time = current->sim_time;
-      lby_data.old_lby = lby;
-    }
-    else
-    {
-      if( current->velocity.length( true ) > 0.1f && !current->fake_walking )
-      {
-        float lby = player->lby( );
+        store_freestanding(player, current);
+        float at_target = math::normalize(math::angle_from_vectors(g_ctx.local->origin(), player->origin()).y);
+        int misses = g_rage_bot->missed_shots[player->index()];
+        auto& lby_data = resolver_info.lby;
+        float lby = player->lby();
 
-        player->eye_angles( ).y = lby;
-
-        lby_data.lby_time = current->sim_time + 0.22f;
-        lby_data.old_lby = lby;
-
-        resolver_info.last_moving_lby = lby;
-        resolver_info.mode = xor_str( "moving" );
-      }
-      else
-      {
-        float lby = player->lby( );
-        if( lby_data.old_lby != lby )
+        if (!current->on_ground)
         {
-          player->eye_angles( ).y = lby;
-          resolver_info.mode = xor_str( "lby update" );
-          lby_data.lby_time = current->sim_time + 1.1f;
-          lby_data.old_lby = lby;
-          return;
-        }
-        else if( current->sim_time >= lby_data.lby_time )
-        {
-          player->eye_angles( ).y = lby;
-          resolver_info.mode = xor_str( "lby update" );
-          lby_data.lby_time = current->sim_time + 1.1f;
-          return;
-        }
-
-        if( misses > 0 )
-        {
-          switch( misses % 3 )
-          {
-          case 1:
-            player->eye_angles( ).y = at_target;
-            break;
-          case 2:
-            player->eye_angles( ).y = at_target - 90.f;
-            break;
-          case 0:
-            player->eye_angles( ).y = at_target + 90.f;
-            break;
-          }
-
-          resolver_info.mode = xor_str( "stand brute" );
+            player->eye_angles().y = (misses < 1) ? at_target : (math::rad_to_deg(std::atan2(current->velocity.y, current->velocity.x)) + ((misses % 3 == 1) ? 180.f : (misses % 3 == 2) ? -90.f : 90.f));
+            resolver_info.mode = (misses < 1) ? xor_str("air") : xor_str("air brute");
+            lby_data.lby_time = current->sim_time;
+            lby_data.old_lby = lby;
         }
         else
         {
-          auto& freestanding = resolver_info.freestanding;
-          if( freestanding.available )
-          {
-            if( freestanding.left_damage <= 0 && freestanding.right_damage <= 0 )
+            if (current->velocity.length(true) > 0.1f && !current->fake_walking)
             {
-              if( freestanding.right_fraction < freestanding.left_fraction )
-                freestanding.yaw = at_target + 90.f;
-              else if( freestanding.right_fraction > freestanding.left_fraction )
-                freestanding.yaw = at_target - 90.f;
+                player->eye_angles().y = lby;
+                lby_data.lby_time = current->sim_time + 0.22f;
+                resolver_info.last_moving_lby = lby;
+                resolver_info.mode = xor_str("moving");
             }
             else
             {
-              if( freestanding.left_damage > freestanding.right_damage )
-                freestanding.yaw = at_target + 90.f;
-              else if( freestanding.left_damage < freestanding.right_damage )
-                freestanding.yaw = at_target - 90.f;
+                if (lby_data.old_lby != lby || current->sim_time >= lby_data.lby_time)
+                {
+                    player->eye_angles().y = lby;
+                    resolver_info.mode = xor_str("lby update");
+                    lby_data.lby_time = current->sim_time + 1.1f;
+                    lby_data.old_lby = lby;
+                    return;
+                }
+
+                if (misses > 0)
+                {
+                    player->eye_angles().y = at_target + ((misses % 3 == 1) ? 0.f : (misses % 3 == 2) ? -90.f : 90.f);
+                    resolver_info.mode = xor_str("stand brute");
+                }
+                else
+                {
+                    auto& freestanding = resolver_info.freestanding;
+                    if (freestanding.available)
+                    {
+                        if (freestanding.left_damage <= 0 && freestanding.right_damage <= 0)
+                        {
+                            freestanding.yaw = at_target + (freestanding.right_fraction < freestanding.left_fraction ? 90.f : -90.f);
+                        }
+                        else
+                        {
+                            freestanding.yaw = (freestanding.left_damage > freestanding.right_damage) ? at_target + 90.f : at_target - 90.f;
+                        }
+
+                        player->eye_angles().y = math::normalize(freestanding.yaw);
+                        resolver_info.mode = xor_str("wall dtc");
+                    }
+                    else
+                    {
+                        player->eye_angles().y = resolver_info.last_moving_lby;
+                        resolver_info.mode = xor_str("last moving lby");
+                    }
+                    resolver_info.last_stand_angle = player->eye_angles().y;
+                }
             }
-
-            player->eye_angles( ).y = math::normalize( freestanding.yaw );
-
-            resolver_info.mode = xor_str( "wall dtc" );
-          }
-          else
-          {
-            player->eye_angles( ).y = resolver_info.last_moving_lby;
-            resolver_info.mode = xor_str( "last moving lby" );
-          }
-
-          resolver_info.last_stand_angle = player->eye_angles( ).y;
         }
-      }
+
+        player->eye_angles().y = math::normalize(player->eye_angles().y);
+        resolver_info.valid = true;
     }
 
-    player->eye_angles( ).y = math::normalize( player->eye_angles( ).y );
-
-    resolver_info.valid = true;
-  }
-
-  void on_fsn( )
-  {
-    static bool should_clear = true;
-    if( g_ctx.in_game )
+    void on_fsn()
     {
-      should_clear = true;
-      return;
-    }
+        static bool should_clear = true;
+        if (g_ctx.in_game)
+        {
+            should_clear = true;
+            return;
+        }
 
-    if( should_clear )
-    {
-      for( auto& i : info )
-        i.reset( );
-
-      should_clear = false;
+        if (should_clear)
+        {
+            for (auto& i : info) i.reset();
+            should_clear = false;
+        }
     }
-  }
 }

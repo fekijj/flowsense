@@ -1,17 +1,16 @@
 #include "setup_bones_manager.h"
-
+#include <future>
+#include <vector>
 #include "../../base/other/game_functions.h"
 #include "../../base/sdk/c_animstate.h"
-
 #include "../config_vars.h"
-
 #include "../features.h"
 
 namespace bone_merge
 {
     uintptr_t& get_bone_merge(c_csplayer* player)
     {
-        return *(uintptr_t*)((uintptr_t)player + *patterns::get_bone_merge.as< uintptr_t* >());
+        return *(uintptr_t*)((uintptr_t)player + *patterns::get_bone_merge.as<uintptr_t*>());
     }
 
     void update_cache(uintptr_t bonemerge)
@@ -19,6 +18,7 @@ namespace bone_merge
         func_ptrs::update_merge_cache(bonemerge);
     }
 }
+
 
 mstudio_pose_param_desc_t* get_pose_parameter(c_studiohdr* hdr, int index)
 {
@@ -55,29 +55,35 @@ void merge_matching_poses(uintptr_t& bone_merge, float* poses, float* target_pos
     if (*(uintptr_t*)(bone_merge + 0x10) && *(uintptr_t*)(bone_merge + 0x8C))
     {
         int* index = (int*)(bone_merge + 0x20);
+
+        std::vector<std::future<void>> futures;
         for (int i = 0; i < 24; ++i)
         {
-            if (*index != -1)
-            {
-                c_csplayer* target = *(c_csplayer**)(bone_merge + 0x4);
-                c_studiohdr* hdr = target->get_studio_hdr();
-                float pose_param_value = 0.f;
-
-                if (hdr && *(studio_hdr_t**)hdr && i >= 0)
+            futures.push_back(std::async(std::launch::async, [i, index, bone_merge, poses, target_poses]() {
+                if (*index != -1)
                 {
-                    float pose = target_poses[i];
-                    mstudio_pose_param_desc_t* pose_param = get_pose_parameter(hdr, i);
+                    c_csplayer* target = *(c_csplayer**)(bone_merge + 0x4);
+                    c_studiohdr* hdr = target->get_studio_hdr();
+                    float pose_param_value = 0.f;
 
-                    pose_param_value = pose * (pose_param->end - pose_param->start) + pose_param->start;
+                    if (hdr && *(studio_hdr_t**)hdr && i >= 0)
+                    {
+                        float pose = target_poses[i];
+                        mstudio_pose_param_desc_t* pose_param = get_pose_parameter(hdr, i);
+                        pose_param_value = pose * (pose_param->end - pose_param->start) + pose_param->start;
+                    }
+
+                    c_csplayer* second_target = *(c_csplayer**)(bone_merge);
+                    c_studiohdr* second_hdr = second_target->get_studio_hdr();
+
+                    poses[*index] = get_pose_parameter_value(second_hdr, *index, pose_param_value);
                 }
-
-                c_csplayer* second_target = *(c_csplayer**)(bone_merge);
-                c_studiohdr* second_hdr = second_target->get_studio_hdr();
-
-                poses[*index] = get_pose_parameter_value(second_hdr, *index, pose_param_value);
-            }
-
+                }));
             ++index;
+        }
+
+        for (auto& f : futures) {
+            f.get();
         }
     }
 }
@@ -121,7 +127,6 @@ void c_bone_builder::store(c_csplayer* player, matrix3x4_t* matrix, int mask)
             poses.data()[7] = 1;
         }
     }
-
 
     c_basecombatweapon* weapon = player->get_active_weapon();
     c_basecombatweapon* world_weapon = nullptr;
@@ -184,7 +189,7 @@ void c_bone_builder::setup()
     animating->bone_accessor()->readable_bones |= mask;
     animating->bone_accessor()->writable_bones |= mask;
 
-    static auto invalidate_bone_cache = patterns::invalidate_bone_cache.as< uint64_t >();
+    static auto invalidate_bone_cache = patterns::invalidate_bone_cache.as<uint64_t>();
     static auto model_bone_counter = *(uintptr_t*)(invalidate_bone_cache + 0xA);
 
     animating->model_recent_bone_counter() = *(uint32_t*)model_bone_counter;
