@@ -76,143 +76,89 @@ c_csplayer* c_anti_aim::get_closest_player( bool skip, bool local_distance )
   return best;
 }
 
-vector3d get_predicted_pos( )
-{
-  float speed = std::max< float >( g_engine_prediction->unprediced_velocity.length( true ), 1.f );
-
-  int max_stop_ticks = std::max< int >( ( ( speed / g_movement->get_max_speed( ) ) * 5.f ) - 1, 0 );
-  int max_predict_ticks = std::clamp( 17 - max_stop_ticks, 0, 17 );
-  if( max_predict_ticks == 0 )
-    return { };
-
-  vector3d last_predicted_velocity = g_engine_prediction->unprediced_velocity;
-  for( int i = 0; i < max_predict_ticks; ++i )
-  {
-    auto pred_velocity = g_engine_prediction->unprediced_velocity * math::ticks_to_time( i + 1 );
-
-    vector3d local_origin = g_ctx.eye_position + pred_velocity;
-    int flags = g_ctx.local->flags( );
-
-    g_utils->extrapolate( g_ctx.local, local_origin, pred_velocity, flags, flags & fl_onground );
-
-    last_predicted_velocity = pred_velocity;
-  }
-
-  auto predicted_eye_pos = g_ctx.eye_position + last_predicted_velocity;
-  return predicted_eye_pos;
-}
-
 bool c_anti_aim::is_peeking( )
 {
-  auto player = this->get_closest_player( );
-  if( !player )
+  auto& players = g_listener_entity->get_entity( ent_player );
+  if( players.empty( ) )
     return false;
 
-  auto predicted_eye_pos = get_predicted_pos( );
-
-  bool can_peek = false;
-  auto& esp_info = g_esp_store->playerinfo [ player->index( ) ];
-  if( !esp_info.valid )
-    return false;
-
-  auto origin = player->dormant( ) ? esp_info.dormant_origin : player->get_abs_origin( );
-
-  if( player->dormant( ) )
+  for( auto& player : players )
   {
-    vector3d poses [ 3 ]{ origin, origin + player->view_offset( ), origin + vector3d( 0.f, 0.f, player->view_offset( ).z / 2.f ) };
+    auto entity = ( c_csplayer* )player.m_entity;
+    if( !entity || !entity->is_alive( ) || entity == g_ctx.local || entity->team( ) == g_ctx.local->team( ) )
+      continue;
 
-    for( int i = 0; i < 3; ++i )
+    auto& esp_info = g_esp_store->playerinfo [ entity->index( ) ];
+    if( !esp_info.valid )
+      continue;
+
+    auto origin = entity->dormant( ) ? esp_info.dormant_origin : entity->get_abs_origin( );
+
+    float speed = std::max< float >( g_engine_prediction->unprediced_velocity.length( true ), 1.f );
+
+    int max_stop_ticks = std::max< int >( ( ( speed / g_movement->get_max_speed( ) ) * 5.f ) - 1, 0 );
+    int max_predict_ticks = std::clamp( 13 - max_stop_ticks, 0, 13 );
+    if( max_predict_ticks == 0 )
+      return false;
+
+    vector3d last_predicted_velocity = g_engine_prediction->unprediced_velocity;
+    for( int i = 0; i < max_predict_ticks; ++i )
     {
-      c_trace_filter filter{ };
-      filter.skip = g_ctx.local;
+      auto pred_velocity = g_engine_prediction->unprediced_velocity * math::ticks_to_time( i + 1 );
 
-      c_game_trace out{ };
-      interfaces::engine_trace->trace_ray( ray_t( predicted_eye_pos, poses [ i ] ), mask_shot_hull | contents_hitbox, &filter, &out );
+      vector3d local_origin = g_ctx.eye_position + pred_velocity;
+      int flags = g_ctx.local->flags( );
 
-      if( out.fraction >= 0.97f )
-      {
-        can_peek = true;
-        break;
-      }
-      else
-        continue;
+      g_utils->extrapolate( g_ctx.local, local_origin, pred_velocity, flags, flags & fl_onground );
+
+      last_predicted_velocity = pred_velocity;
     }
 
-    if( can_peek )
-      return true;
-  }
-  else
-  {
-    auto valid_dmg_on_record = [ & ]( records_t* record )
+    auto predicted_eye_pos = g_ctx.eye_position + last_predicted_velocity;
+
+    auto record = g_animation_fix->get_latest_record( entity );
+
+    if( entity->dormant( ) )
+    {
+      vector3d poses [ 3 ]{ origin, origin + entity->view_offset( ), origin + vector3d( 0.f, 0.f, entity->view_offset( ).z / 2.f ) };
+
+      for( int i = 0; i < 3; ++i )
+      {
+        c_trace_filter filter{ };
+        filter.skip = g_ctx.local;
+
+        c_game_trace out{ };
+        interfaces::engine_trace->trace_ray( ray_t( predicted_eye_pos, poses [ i ] ), mask_shot_hull | contents_hitbox, &filter, &out );
+
+        return out.fraction >= 0.97f;
+      }
+    }
+    else
     {
       for( auto& hitbox : hitbox_list )
       {
-        auto pts = cheat_tools::get_multipoints( player, hitbox, record->sim_orig.bone );
-
-        for( auto& p : pts )
+        if( record )
         {
-          g_rage_bot->store( player );
-          g_rage_bot->set_record( player, record );
+          g_rage_bot->store( entity );
+          g_rage_bot->set_record( entity, record );
 
-          bool ret = g_auto_wall->can_hit_point( player, p.first, predicted_eye_pos, 0 );
+          auto pos = entity->get_hitbox_position( hitbox, record->sim_orig.bone );
+          auto ret = g_auto_wall->can_hit_point( entity, pos, predicted_eye_pos, 0 );
 
-          g_rage_bot->restore( player );
+          g_rage_bot->restore( entity );
 
-          if( ret )
-            return true;
-          else
-            continue;
-        }
-
-        return false;
-      }
-
-      return false;
-    };
-
-    auto old = g_animation_fix->get_oldest_record( player );
-
-    bool can_peek_to_track = false;
-    if( old )
-      can_peek_to_track = valid_dmg_on_record( old );
-
-    if( can_peek_to_track )
-    {
-      can_peek = true;
-      return true;
-    }
-
-    auto last = g_animation_fix->get_latest_record( player );
-
-    if( last )
-    {
-      if( valid_dmg_on_record( last ) )
-      {
-        can_peek = true;
-        return true;
-      }
-    }
-
-    for( auto& hitbox : hitbox_list )
-    {
-      auto pts = cheat_tools::get_multipoints( player, hitbox, player->bone_cache( ).base( ) );
-
-      for( auto& p : pts )
-      {
-        bool ret = g_auto_wall->can_hit_point( player, p.first, predicted_eye_pos, 0 );
-
-        if( ret )
-        {
-          can_peek = true;
-          break;
+          return ret;
         }
         else
-          continue;
+        {
+          auto pos = entity->get_hitbox_position( hitbox );
+          return g_auto_wall->can_hit_point( entity, pos, predicted_eye_pos, 0 );
+        }
       }
     }
   }
 
-  return can_peek;
+  return false;
 }
 
 bool c_anti_aim::is_fake_ducking( )
@@ -530,8 +476,6 @@ void c_anti_aim::on_predict_start( )
   {
     if( !*g_ctx.send_packet )
     {
-      real( );
-
       bool air = !g_utils->on_ground( );
       bool landing = g_ctx.local->fall_velocity( ) > 0.f;
 
@@ -546,34 +490,61 @@ void c_anti_aim::on_predict_start( )
         tick_to_switch = interfaces::global_vars->tick_count;
       }
 
-      if( landing || lby_update )
+      switch( g_cfg.antihit.desync_type )
       {
-        if( this->old_speed != this->random_dist_speed )
+      case 0:
+      {
+        if( landing || !landing && update_tick )
         {
-          math::random_seed( interfaces::global_vars->tick_count );
-          this->random_dist_speed = math::random_float( 1.f, 100.f );
-          this->old_speed = this->random_dist_speed;
+          if( this->old_speed != this->random_dist_speed )
+          {
+            math::random_seed( interfaces::global_vars->tick_count );
+            this->random_dist_speed = math::random_float( 1.f, 100.f );
+            this->old_speed = this->random_dist_speed;
+          }
         }
-      }
-      else
-        this->old_speed = -1.f;
-
-      if( stand && !interfaces::client_state->choked_commands && interfaces::global_vars->cur_time >= g_local_animation_fix->local_info.last_lby_time )
-      {
-        if( g_cfg.antihit.desync_type == 2 )
-          fake_side = flip_side ? 1 : -1;
         else
-          fake_side = g_cfg.binds [ inv_b ].toggled ? -1 : 1;
-
-        if( g_cfg.antihit.desync_type )
+          this->old_speed = -1.f;
+      }
+      break;
+      case 1:
+      case 2:
+      {
+        if( landing || lby_update )
         {
-          *g_ctx.send_packet = true;
+          if( this->old_speed != this->random_dist_speed )
+          {
+            math::random_seed( interfaces::global_vars->tick_count );
+            this->random_dist_speed = math::random_float( 1.f, 100.f );
+            this->old_speed = this->random_dist_speed;
+          }
 
-          float lby_delta = g_cfg.antihit.desync_range * fake_side;
-          g_ctx.cmd->viewangles.y += lby_delta;
+          if( !landing )
+          {
+            if( g_cfg.antihit.desync_type == 2 )
+              fake_side = flip_side ? 1 : -1;
+            else
+              fake_side = g_cfg.binds [ inv_b ].toggled ? -1 : 1;
+
+            *g_ctx.send_packet = true;
+
+            float lby_delta = g_cfg.antihit.desync_range * fake_side;
+            g_ctx.cmd->viewangles.y = math::normalize( this->last_real_angle + lby_delta );
+
+            flip_side = !flip_side;
+          }
         }
+        else
+          this->old_speed = -1.f;
+      }
+      break;
+      }
 
-        flip_side = !flip_side;
+      if( g_cfg.antihit.desync_type == 0 || !lby_update )
+      {
+        real( );
+
+        this->last_real_angle = g_ctx.cmd->viewangles.y;
       }
     }
     else
@@ -589,6 +560,9 @@ void c_anti_aim::on_predict_end( )
 
   if( g_ctx.local->move_type( ) == movetype_ladder || g_ctx.local->move_type( ) == movetype_noclip )
     return;
+
+  if( !g_cfg.misc.slide_walk )
+    g_ctx.cmd->buttons &= ~( in_forward | in_back | in_moveright | in_moveleft );
 
   g_movement->fix_movement( g_ctx.cmd, g_ctx.base_angle );
 }

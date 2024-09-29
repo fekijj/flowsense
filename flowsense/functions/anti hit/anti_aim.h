@@ -19,6 +19,7 @@ private:
   int fake_side{ };
   float fake_angle{ };
   float best_dist{ };
+  float best_yaw{ };
 
   float last_real_angle = -1;
   float old_speed = -1;
