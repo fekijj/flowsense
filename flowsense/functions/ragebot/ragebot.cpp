@@ -1,4 +1,4 @@
-#include "ragebot.h"
+﻿#include "ragebot.h"
 #include "../features.h"
 
 #include "../../base/tools/threads.h"
@@ -452,14 +452,16 @@ void thread_build_points(aim_cache_t* aim_cache)
     g_rage_bot->store(aim_cache->player);
     g_rage_bot->set_record(aim_cache->player, best_record);
 
-    for (auto& hitbox : g_rage_bot->get_hitboxes())
+    const auto& hitboxes = g_rage_bot->get_hitboxes(); // кэшируем hitboxes для уменьшения вызовов функции
+
+    for (const auto& hitbox : hitboxes)
     {
         const auto& pts = cheat_tools::get_multipoints(aim_cache->player, hitbox, best_record->sim_orig.bone);
-        for (auto& p : pts)
-        {
-            auto awall = g_auto_wall->fire_bullet(g_ctx.local, aim_cache->player, g_ctx.weapon_info, g_ctx.weapon->is_taser(), g_ctx.eye_position, p.first);
 
-            // interfaces::debug_overlay->add_text_overlay(p.first, interfaces::global_vars->interval_per_tick * 2.f, "%d", awall.dmg);
+        for (const auto& p : pts)
+        {
+            const auto eye_pos = g_ctx.eye_position; // кэшируем позицию глаза для уменьшения вызовов
+            const auto awall = g_auto_wall->fire_bullet(g_ctx.local, aim_cache->player, g_ctx.weapon_info, g_ctx.weapon->is_taser(), eye_pos, p.first);
 
             auto new_point = point_t(hitbox, p.second, awall.dmg, best_record, p.first);
 
@@ -469,16 +471,20 @@ void thread_build_points(aim_cache_t* aim_cache)
 #ifdef _DEBUG
             if (g_rage_bot->debug_aimbot)
             {
-                interfaces::debug_overlay->add_box_overlay(
-                    new_point.position, vector3d(-1, -1, -1), vector3d(1, 1, 1), { }, 255, new_point.center ? 255 : 0, new_point.center ? 255 : 0, 200, interfaces::global_vars->interval_per_tick * 2.f);
+                const vector3d box_size(-1, -1, -1), box_size_1(1, 1, 1); // кэшируем размеры для box_overlay
+                const float duration = interfaces::global_vars->interval_per_tick * 2.f; // кэшируем длительность
 
-                interfaces::debug_overlay->add_text_overlay(new_point.position, interfaces::global_vars->interval_per_tick * 2.f, "%d", new_point.damage);
-            }
+                interfaces::debug_overlay->add_box_overlay(
+                    new_point.position, box_size, box_size_1, {},
+                    255, new_point.center ? 255 : 0, new_point.center ? 255 : 0, 200, duration);
+
+                interfaces::debug_overlay->add_text_overlay(new_point.position, duration, "%d", new_point.damage);
+        }
 #endif
 
             aim_cache->points.emplace_back(new_point);
-        }
     }
+}
 
     g_rage_bot->restore(aim_cache->player);
 }
