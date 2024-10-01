@@ -479,12 +479,12 @@ void thread_build_points(aim_cache_t* aim_cache)
                     255, new_point.center ? 255 : 0, new_point.center ? 255 : 0, 200, duration);
 
                 interfaces::debug_overlay->add_text_overlay(new_point.position, duration, "%d", new_point.damage);
-        }
+            }
 #endif
 
             aim_cache->points.emplace_back(new_point);
+        }
     }
-}
 
     g_rage_bot->restore(aim_cache->player);
 }

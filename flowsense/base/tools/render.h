@@ -35,6 +35,7 @@ struct fonts_t
   ImFont* bold{ };
   ImFont* bold2{ };
   ImFont* bold_large{ };
+  ImFont* name{ };
   ImFont* dmg{ };
   ImFont* large{ };
   ImFont* eventlog{ };

@@ -129,61 +129,52 @@ void c_engine_prediction::update( ) {
 }
 
 void c_engine_prediction::start(c_csplayer* local, c_usercmd* cmd) {
-  if( !local || !cmd )
-  {
-    return;
-  }
+    if (!local || !cmd)
+        return;
 
-  auto weapon = local->get_active_weapon( );
-  if( !weapon )
-  {
-    return;
-  }
+    auto weapon = local->get_active_weapon();
+    if (!weapon)
+        return;
 
-  auto tick_base = g_ctx.tick_base;
+    // Сохраняем текущее состояние
+    unpred_vars[cmd->command_number % 150].fill();
+    unprediced_velocity = local->velocity();
+    unpredicted_flags = local->flags();
 
-  unpred_vars [ cmd->command_number % 150 ].fill( );
+    const float interval_per_tick = interfaces::global_vars->interval_per_tick;
+    const float cur_time = math::ticks_to_time(g_ctx.tick_base);
 
-  unprediced_velocity = local->velocity( );
-  unpredicted_flags = local->flags( );
+    // Сохраняем оригинальные переменные
+    old_cur_time = interfaces::global_vars->cur_time;
+    old_frame_time = interfaces::global_vars->frame_time;
+    old_tick_count = interfaces::global_vars->tick_count;
+    old_in_prediction = interfaces::prediction->in_prediction;
+    old_first_time_predicted = interfaces::prediction->is_first_time_predicted;
 
-  const float interval_per_tick = interfaces::global_vars->interval_per_tick;
-  const float cur_time = math::ticks_to_time( tick_base );
+    const int command_number = cmd->command_number;
+    const int seed = MD5_PseudoRandom(command_number) & 0x7FFFFFFF;
 
-  old_cur_time = interfaces::global_vars->cur_time;
-  old_frame_time = interfaces::global_vars->frame_time;
-  old_tick_count = interfaces::global_vars->tick_count;
+    // Сохраняем состояние для предсказаний
+    old_seed = *prediction_random_seed;
+    old_recoil_index = weapon->recoil_index();
+    old_accuracy_penalty = weapon->accuracy_penalty();
 
-  old_in_prediction = interfaces::prediction->in_prediction;
-  old_first_time_predicted = interfaces::prediction->is_first_time_predicted;
+    // Устанавливаем время для нового предсказания
+    interfaces::global_vars->cur_time = cur_time;
+    interfaces::global_vars->frame_time = interval_per_tick;
 
-  const int command_number = cmd->command_number;
-  const int seed = MD5_PseudoRandom( command_number ) & 0x7FFFFFFF;
+    // Устанавливаем команду
+    *(c_usercmd**)((uintptr_t)local + 0x3314) = cmd;
+    *(c_usercmd*)((uintptr_t)local + 0x326C) = *cmd;
 
-  old_seed = *prediction_random_seed;
+    interfaces::prediction->in_prediction = true;
+    interfaces::prediction->is_first_time_predicted = false;
 
-  old_recoil_index = weapon->recoil_index();
-  old_accuracy_penalty = weapon->accuracy_penalty();
+    *prediction_random_seed = seed;
+    *prediction_player = reinterpret_cast<int>(local);
 
- interfaces::global_vars->cur_time = cur_time;
-  interfaces::global_vars->frame_time = interval_per_tick;
-
-  *( c_usercmd** )( ( uintptr_t )local + 0x3314 ) = cmd;
-  *( c_usercmd* )( ( uintptr_t )local + 0x326C ) = *cmd;
-
-  interfaces::prediction->in_prediction = true;
-  interfaces::prediction->is_first_time_predicted = false;
-
-  *( c_usercmd** )( ( uintptr_t )local + 0x3314 ) = cmd;
-  *( c_usercmd* )( ( uintptr_t )local + 0x326C ) = *cmd;
-
-  *prediction_random_seed = seed;
-  *prediction_player = reinterpret_cast<int>(local);
-
-  interfaces::prediction->in_prediction = true;
-  interfaces::prediction->is_first_time_predicted = false;
-
-  this->repredict(local, cmd, true);
+    // Запускаем репредикт для точности
+    this->repredict(local, cmd, true);
 }
 
 void c_engine_prediction::force_update_eyepos(const float& pitch) {
@@ -224,76 +215,68 @@ void c_engine_prediction::force_update_eyepos(const float& pitch) {
 }
 
 
-void c_engine_prediction::repredict( c_csplayer* local, c_usercmd* cmd, bool real_cmd )
-{
-  if( !local )
-    return;
+void c_engine_prediction::repredict(c_csplayer* local, c_usercmd* cmd, bool real_cmd) {
+    if (!local)
+        return;
 
-  auto state = local->animstate( );
-  if( !state )
-    return;
+    auto state = local->animstate();
+    if (!state)
+        return;
 
-  auto weapon = local->get_active_weapon( );
-  if( !weapon )
-    return;
+    auto weapon = local->get_active_weapon();
+    if (!weapon)
+        return;
 
-  auto old_tickbase = local->tickbase( );
+    auto old_tickbase = local->tickbase();
 
-  if( real_cmd )
-  {
-    g_ctx.cmd->buttons |= *( uint8_t* )( ( uintptr_t )local + 0x31EC );
+    if (real_cmd) {
+        g_ctx.cmd->buttons |= *(uint8_t*)((uintptr_t)local + 0x31EC);
 
-    if( g_ctx.cmd->impulse )
-      *( uint8_t* )( ( uintptr_t )local + 0x31EC ) = g_ctx.cmd->impulse;
-  }
+        if (g_ctx.cmd->impulse)
+            *(uint8_t*)((uintptr_t)local + 0x31EC) = g_ctx.cmd->impulse;
+    }
 
-  interfaces::game_movement->start_track_prediction_errors( local );
+    interfaces::game_movement->start_track_prediction_errors(local);
 
-  if( real_cmd )
-  {
-    int buttonsChanged = g_ctx.cmd->buttons ^ *( int* )( ( uintptr_t )local + 0x31E8 );
-    *( int* )( ( uintptr_t )local + 0x31DC ) = ( uintptr_t )local + 0x31E8;
-    *( int* )( ( uintptr_t )local + 0x31E8 ) = g_ctx.cmd->buttons;
-    *( int* )( ( uintptr_t )local + 0x31E0 ) = g_ctx.cmd->buttons & buttonsChanged;  // m_afButtonPressed ~ The changed ones still down are "pressed"
-    *( int* )( ( uintptr_t )local + 0x31E4 ) = buttonsChanged & ~g_ctx.cmd->buttons; // m_afButtonReleased ~ The ones not down are "released"
-  }
+    if (real_cmd) {
+        int buttonsChanged = g_ctx.cmd->buttons ^ *(int*)((uintptr_t)local + 0x31E8);
+        *(int*)((uintptr_t)local + 0x31DC) = (uintptr_t)local + 0x31E8;
+        *(int*)((uintptr_t)local + 0x31E8) = g_ctx.cmd->buttons;
+        *(int*)((uintptr_t)local + 0x31E0) = g_ctx.cmd->buttons & buttonsChanged;
+        *(int*)((uintptr_t)local + 0x31E4) = buttonsChanged & ~g_ctx.cmd->buttons;
+    }
 
-  memset( &move_data, 0, sizeof( c_movedata ) );
+    memset(&move_data, 0, sizeof(c_movedata));
 
-  interfaces::prediction->check_moving_ground( local, interfaces::global_vars->frame_time );
-  interfaces::prediction->set_local_view_angles( cmd->viewangles );
+    interfaces::prediction->check_moving_ground(local, interfaces::global_vars->frame_time);
+    interfaces::prediction->set_local_view_angles(cmd->viewangles);
 
-  local->run_pre_think( );
-  local->run_think( );
+    local->run_pre_think();
+    local->run_think();
 
-  interfaces::move_helper->set_host( local );
-  interfaces::prediction->setup_move( local, cmd, interfaces::move_helper, &move_data );
-  interfaces::game_movement->process_movement( local, &move_data );
-  interfaces::prediction->finish_move( local, cmd, &move_data );
+    interfaces::move_helper->set_host(local);
+    interfaces::prediction->setup_move(local, cmd, interfaces::move_helper, &move_data);
+    interfaces::game_movement->process_movement(local, &move_data);
+    interfaces::prediction->finish_move(local, cmd, &move_data);
 
-  interfaces::move_helper->process_impacts( );
+    interfaces::move_helper->process_impacts();
 
-  local->post_think( );
+    local->post_think();
+    local->tickbase() = old_tickbase;
 
-  local->tickbase( ) = old_tickbase;
+    interfaces::game_movement->finish_track_prediction_errors(local);
+    interfaces::move_helper->set_host(nullptr);
 
-  interfaces::game_movement->finish_track_prediction_errors( local );
-  interfaces::move_helper->set_host( nullptr );
-
-  if( weapon && !weapon->is_misc_weapon( ) )
-  {
-    weapon->update_accuracy_penalty( );
-
-    predicted_inaccuracy = weapon->get_inaccuracy( );
-    predicted_spread = weapon->get_spread( );
-  }
+    if (weapon && !weapon->is_misc_weapon()) {
+        weapon->update_accuracy_penalty();
+        predicted_inaccuracy = weapon->get_inaccuracy();
+        predicted_spread = weapon->get_spread();
+    }
 }
 
-
 void c_engine_prediction::finish_multithread(c_csplayer* local) {
-    if (!local || !local->get_active_weapon()) {
+    if (!local || !local->get_active_weapon())
         return;
-    }
 
     auto weapon = local->get_active_weapon();
 
@@ -309,18 +292,14 @@ void c_engine_prediction::finish_multithread(c_csplayer* local) {
     *prediction_random_seed = old_seed;
     *prediction_player = 0;
 
-    // interfaces::game_movement->reset(); // Операция сброса, если она не является необходимой, можно закомментировать.
-
     interfaces::prediction->in_prediction = old_in_prediction;
     interfaces::prediction->is_first_time_predicted = old_first_time_predicted;
 }
 
 void c_engine_prediction::finish(c_csplayer* local) {
-    // Вызываем finish_multithread в асинхронных задачах
     std::future<void> task1 = std::async(std::launch::async, &c_engine_prediction::finish_multithread, this, local);
     std::future<void> task2 = std::async(std::launch::async, &c_engine_prediction::finish_multithread, this, local);
 
-    // Дожидаемся завершения задач
     task1.get();
     task2.get();
 }

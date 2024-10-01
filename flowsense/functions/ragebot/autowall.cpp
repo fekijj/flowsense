@@ -2,7 +2,7 @@
 
 #include "../../base/sdk.h"
 #include "../../base/global_context.h"
-
+#include "../../base/interfaces/client.h"
 #include "../../base/sdk/entity.h"
 
 constexpr int shot_hull = mask_shot_hull;
@@ -104,19 +104,22 @@ bool c_auto_wall::can_hit_point(c_csplayer* entity, const vector3d& point, const
 
 bool c_auto_wall::trace_to_exit(const vector3d& src, const vector3d& dir, const c_game_trace& enter_trace, c_game_trace& exit_trace)
 {
-    float dist{ };
-    int first_contents{ };
+    float dist = 0.0f;
+    int first_contents = 0;
 
-    constexpr auto k_step_size = 4.f;
-    constexpr auto k_max_dist = 90.f;
+    constexpr float k_step_size = 4.0f;
+    constexpr float k_max_dist = 90.0f;
 
     while (dist <= k_max_dist)
     {
         dist += k_step_size;
 
-        const auto out = src + (dir * dist);
+        vector3d out = src + dir * dist;
 
-        const auto cur_contents = interfaces::engine_trace->get_point_contents(out, shot_player);
+        if (!interfaces::engine_trace)
+            return false;
+
+        int cur_contents = interfaces::engine_trace->get_point_contents(out, shot_player);
 
         if (!first_contents)
             first_contents = cur_contents;
@@ -125,6 +128,9 @@ bool c_auto_wall::trace_to_exit(const vector3d& src, const vector3d& dir, const 
             continue;
 
         interfaces::engine_trace->trace_ray(ray_t(out, out - dir * k_step_size), shot_player, nullptr, &exit_trace);
+
+        if (!exit_trace.did_hit() || exit_trace.entity == nullptr || exit_trace.entity->index() == -1)
+            return false;
 
         if (exit_trace.start_solid && exit_trace.surface.flags & surf_hitbox)
         {
@@ -140,11 +146,10 @@ bool c_auto_wall::trace_to_exit(const vector3d& src, const vector3d& dir, const 
 
         if (!exit_trace.did_hit() || exit_trace.start_solid)
         {
-            if (enter_trace.entity && enter_trace.entity->index() && this->is_breakable_entity(enter_trace.entity))
+            if (enter_trace.entity && enter_trace.entity->index() != -1 && this->is_breakable_entity(enter_trace.entity))
             {
                 exit_trace = enter_trace;
                 exit_trace.end = src + dir;
-
                 return true;
             }
 
@@ -160,7 +165,7 @@ bool c_auto_wall::trace_to_exit(const vector3d& src, const vector3d& dir, const 
                 continue;
         }
 
-        if (exit_trace.plane.normal.dot(dir) <= 1.f)
+        if (exit_trace.plane.normal.dot(dir) <= 1.0f)
             return true;
     }
 
@@ -204,11 +209,25 @@ void c_auto_wall::clip_trace_to_player(const vector3d& src, const vector3d& dst,
     }
 }
 
+bool c_auto_wall::trace_to_hitbox(const vector3d& src, const vector3d& dst, c_game_trace& trace, c_csplayer* const target) {
+    interfaces::engine_trace->clip_ray_to_entity(ray_t(src, dst), shot_hull | contents_hitbox, target, &trace);
 
-bool c_auto_wall::handle_bullet_penetration(
-    c_csplayer* const shooter, const weapon_info_t* const wpn_data, const c_game_trace& enter_trace, vector3d& src, const vector3d& dir, int& pen_count, float& cur_dmg, const float pen_modifier)
+
+    if (trace.fraction == 1.0f) {
+        return false;
+    }
+
+    if (trace.hitgroup >= hitgroup_head && trace.hitgroup <= hitgroup_rightleg) {
+        return true;
+    }
+
+    return false;
+}
+
+
+bool c_auto_wall::handle_bullet_penetration(c_csplayer* const shooter, const weapon_info_t* const wpn_data, const c_game_trace& enter_trace, vector3d& src, const vector3d& dir, int& pen_count, float& cur_dmg, const float pen_modifier)
 {
-    if (pen_count <= 0 || wpn_data->penetration <= 0.f)
+    if (!shooter || !wpn_data || pen_count <= 0 || wpn_data->penetration <= 0.0f)
         return false;
 
     c_game_trace exit_trace;
@@ -222,7 +241,9 @@ bool c_auto_wall::handle_bullet_penetration(
     const auto exit_surface_data = interfaces::phys_surface_props->get_surface_data(exit_trace.surface.surface_props);
     const auto enter_surface_data = interfaces::phys_surface_props->get_surface_data(enter_trace.surface.surface_props);
 
-    // Check for specific surface materials
+    if (!enter_surface_data || !exit_surface_data)
+        return false;
+
     if (enter_surface_data->game.material == 'G' || enter_surface_data->game.material == 'Y')
     {
         final_dmg_modifier = 0.05f;
@@ -330,7 +351,6 @@ void c_auto_wall::scale_dmg(c_csplayer* const player, float& dmg, const float ar
     dmg *= hitgroup_mult;
 }
 
-
 pen_data_t c_auto_wall::fire_bullet(c_csplayer* const shooter, c_csplayer* const target, const weapon_info_t* const wpn_data, const bool is_taser, vector3d src, const vector3d& dst, bool ignore_target)
 {
     auto pen_modifier = std::max((3.0f / wpn_data->penetration) * 1.25f, 0.0f);
@@ -373,7 +393,7 @@ pen_data_t c_auto_wall::fire_bullet(c_csplayer* const shooter, c_csplayer* const
             {
                 const auto is_player = trace.entity->is_player();
                 if ((trace.entity == target || (is_player && static_cast<c_csplayer*>(trace.entity)->team() != shooter->team())) &&
-                    ((trace.hitgroup >= 1 && trace.hitgroup <= 7) || trace.hitgroup == 10))
+                     trace_to_hitbox(src, cur_dst, trace, target))
                 {
                     data.hit_player = static_cast<c_csplayer*>(trace.entity);
                     data.hitbox = trace.hitbox;
@@ -409,7 +429,6 @@ pen_data_t c_auto_wall::fire_bullet(c_csplayer* const shooter, c_csplayer* const
 
     return data;
 }
-
 
 pen_data_t c_auto_wall::fire_emulated(c_csplayer* const shooter, c_csplayer* const target, vector3d src, const vector3d& dst)
 {

@@ -2,7 +2,7 @@
 extern unsigned char gamesense_sound[765558];
 
 extern const char tapSound[765558];
-extern unsigned char smallest_pixel_7[25600];
+extern unsigned char smallest_pixel_7[7972];
 extern unsigned char Verdana_Regular[243304];
 extern unsigned char Verdana_Bold[155384];
 extern unsigned char SFUIDisplay_Regular[170404];

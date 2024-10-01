@@ -60,7 +60,7 @@ namespace esp_renderer
       render_string( box.x + box.w + add + 4.f, box.y + offset );
       break;
     case esp_down:
-      render_string( box.x + box.w / 2.f, box.y + box.h + add_h + offset + 3.f, true );
+      render_string( box.x + box.w / 2.f, box.y + box.h + add_h + offset - 1, true );
       break;
     }
 

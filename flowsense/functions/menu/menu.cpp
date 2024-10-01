@@ -196,7 +196,7 @@ void c_menu::draw_ui_background( )
 
   auto clr = g_cfg.misc.ui_color.base( );
 
-  ImGui::PushFont( g_fonts.dmg );
+  ImGui::PushFont( g_fonts.name );
   auto text_size = ImGui::CalcTextSize( this->prefix.c_str( ) );
 
   list->AddImage(

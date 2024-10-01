@@ -1,18 +1,17 @@
 ﻿#include "animfix.h"
 #include "../features.h"
 #include "../../base/tools/threads.h"
-#include <future>
-#include <vector>
 
 void c_animation_fix::anim_player_t::simulate_animation_side(records_t* record)
 {
     auto state = ptr->animstate();
-    if (!state) return;
+    if (!state)
+        return;
 
     if (!last_record)
         state->last_update_time = (record->sim_time - interfaces::global_vars->interval_per_tick);
 
-    restore_anims_t restore{};
+    restore_anims_t restore{ };
     restore.store(ptr);
 
     if (!teammate)
@@ -20,7 +19,10 @@ void c_animation_fix::anim_player_t::simulate_animation_side(records_t* record)
 
     if (last_record && record->choke >= 2)
     {
-        ptr->flags() = record->on_ground ? ptr->flags() | fl_onground : ptr->flags() & ~fl_onground;
+        if (record->on_ground)
+            ptr->flags() |= fl_onground;
+        else
+            ptr->flags() &= ~fl_onground;
 
         if (state->on_ground && state->velocity_length_xy <= 0.1f && !state->landing && state->last_update_increment > 0.f)
         {
@@ -34,15 +36,21 @@ void c_animation_fix::anim_player_t::simulate_animation_side(records_t* record)
     }
 
     this->force_update();
+
     ptr->store_poses(record->poses);
 
     auto old = ptr->get_abs_origin();
     ptr->set_abs_origin(record->origin);
 
-    record->sim_orig.layers[12].weight = last_record ? last_record->sim_orig.layers[12].weight : 0.f;
+    // 100iq lean fix
+    if (last_record)
+        record->sim_orig.layers[12].weight = last_record->sim_orig.layers[12].weight;
+    else
+        record->sim_orig.layers[12].weight = 0.f;
 
     ptr->set_layer(record->sim_orig.layers);
     this->build_bones(record, &record->sim_orig);
+
     ptr->set_abs_origin(old);
 
     restore.restore(ptr);
@@ -51,12 +59,28 @@ void c_animation_fix::anim_player_t::simulate_animation_side(records_t* record)
 bool records_t::is_valid()
 {
     auto netchan = interfaces::engine->get_net_channel_info();
-    if (!interfaces::engine->get_net_channel_info() || !g_ctx.lagcomp || !valid) return false;
+    if (!netchan)
+        return false;
+
+    if (!g_ctx.lagcomp)
+        return true;
+
+    if (!valid)
+        return false;
 
     float time = g_ctx.local->is_alive() ? g_ctx.predicted_curtime : interfaces::global_vars->cur_time;
-    float correct = std::clamp(netchan->get_latency(flow_outgoing) + netchan->get_latency(flow_incoming) + g_ctx.lerp_time, 0.0f, cvars::sv_maxunlag->get_float());
 
-    return std::fabsf(correct - (time - this->sim_time)) < 0.2f;
+    float correct = 0.f;
+
+    correct += netchan->get_latency(flow_outgoing);
+    correct += netchan->get_latency(flow_incoming);
+    correct += g_ctx.lerp_time;
+
+    correct = std::clamp< float >(correct, 0.0f, cvars::sv_maxunlag->get_float());
+
+    float deltaTime = correct - (time - this->sim_time);
+
+    return std::fabsf(deltaTime) < 0.2f;
 }
 
 void c_animation_fix::anim_player_t::build_bones(records_t* record, records_t::simulated_data_t* sim)
@@ -68,10 +92,12 @@ void c_animation_fix::anim_player_t::update_animations()
 {
     backup_record.update_record(ptr);
 
-    if (!records.empty())
+    if (records.size() > 0)
     {
         last_record = &records.front();
-        old_record = records.size() >= 3 ? &records[2] : nullptr;
+
+        if (records.size() >= 3)
+            old_record = &records[2];
     }
 
     auto& record = records.emplace_front();
@@ -79,7 +105,8 @@ void c_animation_fix::anim_player_t::update_animations()
     record.update_dormant(dormant_ticks);
     record.update_shot(last_record);
 
-    dormant_ticks = dormant_ticks < 1 ? dormant_ticks + 1 : dormant_ticks;
+    if (dormant_ticks < 1)
+        dormant_ticks++;
 
     this->update_land(&record);
     this->update_velocity(&record);
@@ -94,19 +121,18 @@ void c_animation_fix::anim_player_t::update_animations()
             next_update_time = record.sim_time + std::abs(last_record->sim_time - record.sim_time) + math::ticks_to_time(1);
             record.valid = false;
         }
-        else if (math::time_to_ticks(std::abs(next_update_time - record.sim_time)) > 17)
+        else
         {
-            next_update_time = -1.f;
-        }
+            if (math::time_to_ticks(std::abs(next_update_time - record.sim_time)) > 17)
+                next_update_time = -1.f;
 
-        if (next_update_time > record.sim_time)
-        {
-            record.valid = false;
+            if (next_update_time > record.sim_time)
+                record.valid = false;
         }
     }
 
     const auto records_size = teammate ? 3 : g_ctx.tick_rate;
-    if (records.size() > records_size)
+    while (records.size() > records_size)
         records.pop_back();
 }
 
@@ -120,7 +146,7 @@ void c_animation_fix::on_net_update_and_render_after(int stage)
     if (!g_ctx.in_game || !g_ctx.local || g_ctx.uninject)
         return;
 
-    const std::unique_lock<std::mutex> lock(mutexes::animfix);
+    const std::unique_lock< std::mutex > lock(mutexes::animfix);
 
     if (!g_ctx.in_game || !g_ctx.local || g_ctx.uninject)
         return;
@@ -135,14 +161,14 @@ void c_animation_fix::on_net_update_and_render_after(int stage)
     {
         g_rage_bot->on_pre_predict();
 
-        std::vector<std::future<void>> futures;
         for (auto& player : players)
         {
             auto ptr = (c_csplayer*)player.m_entity;
-            if (!ptr || ptr == g_ctx.local || !ptr->is_alive())
-            {
+            if (!ptr)
                 continue;
-            }
+
+            if (ptr == g_ctx.local)
+                continue;
 
             auto anim_player = this->get_animation_player(ptr->index());
             if (anim_player->ptr != ptr)
@@ -152,16 +178,64 @@ void c_animation_fix::on_net_update_and_render_after(int stage)
                 continue;
             }
 
-            futures.push_back(g_thread_pool->enqueue(thread_anim_update, anim_player));
+            if (!ptr->is_alive())
+            {
+                if (!anim_player->teammate)
+                {
+                    resolver::reset_info(ptr);
+                    g_rage_bot->missed_shots[ptr->index()] = 0;
+                }
+
+                anim_player->ptr = nullptr;
+                continue;
+            }
+
+            if (g_cfg.misc.force_radar && ptr->team() != g_ctx.local->team())
+                ptr->target_spotted() = true;
+
+            if (ptr->dormant())
+            {
+                anim_player->dormant_ticks = 0;
+
+                if (!anim_player->teammate)
+                    resolver::reset_info(ptr);
+                continue;
+            }
+
+            if (ptr->simulation_time() == ptr->old_simtime())
+                continue;
+
+            auto& layer = ptr->anim_overlay()[11];
+            if (layer.cycle == anim_player->old_aliveloop_cycle)
+                continue;
+
+            anim_player->old_aliveloop_cycle = layer.cycle;
+
+            auto state = ptr->animstate();
+            if (!state)
+                continue;
+
+            if (anim_player->old_spawn_time != ptr->spawn_time())
+            {
+                state->player = ptr;
+                state->reset();
+
+                anim_player->old_spawn_time = ptr->spawn_time();
+                continue;
+            }
+
+#ifdef _DEBUG
+            anim_player->update_animations();
+#else
+            g_thread_pool->enqueue(thread_anim_update, anim_player);
+#endif
         }
 
-        for (auto& future : futures)
-        {
-            future.get();
-        }
+#ifndef _DEBUG
+        g_thread_pool->wait();
+#endif
     }
     break;
-
     case frame_render_start:
     {
         for (auto& player : players)
@@ -185,6 +259,7 @@ void c_animation_fix::on_net_update_and_render_after(int stage)
             math::change_matrix_position(first_record->render_bones, 128, first_record->origin, entity->get_render_origin());
 
             entity->interpolate_moveparent_pos();
+
             entity->set_bone_cache(first_record->render_bones);
             entity->attachments_helper();
         }

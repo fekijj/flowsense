@@ -29,6 +29,8 @@ private:
 	bool handle_bullet_penetration(c_csplayer* const shooter, const weapon_info_t* const wpn_data, const c_game_trace& enter_trace, vector3d& src, const vector3d& dir, int& pen_count, float& cur_dmg, const float pen_modifier);
 
 public:
+	
+	bool trace_to_hitbox(const vector3d& src, const vector3d& dst, c_game_trace& trace, c_csplayer* const target);
 	bool is_breakable_entity(c_baseentity* entity);
 	bool can_hit_point(c_csplayer* entity, const vector3d& point, const vector3d& source, int min_damage, c_csplayer* shooter = g_ctx.local, int* out = nullptr);
 
