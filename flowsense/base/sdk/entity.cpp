@@ -398,32 +398,61 @@ c_basecombatweapon* c_basecombatweapon::get_weapon_world_model( )
   c_basecombatweapon* weapon_world_model = ( c_basecombatweapon* )interfaces::entity_list->get_entity_handle( this->weapon_world_model( ) );
   return weapon_world_model;
 }
-
-unsigned int find_in_datamap( datamap_t* map, const char* name )
+unsigned int find_in_datamap(datamap_t* map, const char* name)
 {
-  while( map )
-  {
-    for( int i = 0; i < map->data_num_fields; i++ )
+    while (map)
     {
-      if( map->data_desc [ i ].field_name == nullptr )
-        continue;
-
-      if( !strcmp( name, map->data_desc [ i ].field_name ) )
-        return map->data_desc [ i ].field_offset;
-
-      if( map->data_desc [ i ].field_type == field_embedded )
-      {
-        if( map->data_desc [ i ].td )
+        int limit = map->data_num_fields - 3;
+        for (int i = 0; i <= limit; i += 4)
         {
-          unsigned int offset = { };
+            if (map->data_desc[i].field_name && strcmp(name, map->data_desc[i].field_name) == 0)
+                return map->data_desc[i].field_offset;
+            if (map->data_desc[i + 1].field_name && strcmp(name, map->data_desc[i + 1].field_name) == 0)
+                return map->data_desc[i + 1].field_offset;
+            if (map->data_desc[i + 2].field_name && strcmp(name, map->data_desc[i + 2].field_name) == 0)
+                return map->data_desc[i + 2].field_offset;
+            if (map->data_desc[i + 3].field_name && strcmp(name, map->data_desc[i + 3].field_name) == 0)
+                return map->data_desc[i + 3].field_offset;
 
-          if( ( offset = find_in_datamap( map->data_desc [ i ].td, name ) ) != 0 )
-            return offset;
+            if (map->data_desc[i].field_type == field_embedded && map->data_desc[i].td)
+            {
+                unsigned int offset = find_in_datamap(map->data_desc[i].td, name);
+                if (offset)
+                    return offset;
+            }
+            if (map->data_desc[i + 1].field_type == field_embedded && map->data_desc[i + 1].td)
+            {
+                unsigned int offset = find_in_datamap(map->data_desc[i + 1].td, name);
+                if (offset)
+                    return offset;
+            }
+            if (map->data_desc[i + 2].field_type == field_embedded && map->data_desc[i + 2].td)
+            {
+                unsigned int offset = find_in_datamap(map->data_desc[i + 2].td, name);
+                if (offset)
+                    return offset;
+            }
+            if (map->data_desc[i + 3].field_type == field_embedded && map->data_desc[i + 3].td)
+            {
+                unsigned int offset = find_in_datamap(map->data_desc[i + 3].td, name);
+                if (offset)
+                    return offset;
+            }
         }
-      }
-    }
-    map = map->base_map;
-  }
 
-  return 0;
+        for (int i = (map->data_num_fields / 4) * 4; i < map->data_num_fields; i++)
+        {
+            if (map->data_desc[i].field_name && strcmp(name, map->data_desc[i].field_name) == 0)
+                return map->data_desc[i].field_offset;
+            if (map->data_desc[i].field_type == field_embedded && map->data_desc[i].td)
+            {
+                unsigned int offset = find_in_datamap(map->data_desc[i].td, name);
+                if (offset)
+                    return offset;
+            }
+        }
+
+        map = map->base_map;
+    }
+    return 0;
 }

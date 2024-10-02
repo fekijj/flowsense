@@ -187,34 +187,44 @@ bool c_rage_bot::should_stop(bool shoot_check)
 
 void c_rage_bot::start_stop()
 {
+    // Early return if there's no weapon or if stopping is false
     if (!g_ctx.weapon || !stopping)
         return;
 
-    bool weapon_for_tp = g_ctx.weapon->is_pistols() && !g_ctx.weapon->is_heavy_pistols() && g_ctx.weapon->item_definition_index() == weapon_awp || g_ctx.weapon->item_definition_index() == weapon_ssg08;
+    // Combine the condition for weapon types for teleport
+    int weapon_idx = g_ctx.weapon->item_definition_index();
+    bool weapon_for_tp = g_ctx.weapon->is_pistols() && !g_ctx.weapon->is_heavy_pistols() &&
+        (weapon_idx == weapon_awp || weapon_idx == weapon_ssg08);
 
+    // Early return if teleporting with shift and can't shoot
     if (weapon_for_tp && g_exploits->cl_move.shift && !g_utils->is_able_to_shoot(true))
         return;
 
+    // Check if stopping is required and apply auto-stop if needed
     if (this->should_stop())
         force_accuracy = this->auto_stop();
 }
 
+
 bool c_rage_bot::auto_stop()
 {
-    auto velocity = g_ctx.local->velocity();
-    float raw_speed = velocity.length(true);
+    // Cache max_speed to avoid calling get_max_speed multiple times
+    float max_speed = g_movement->get_max_speed() * 0.34f;
 
-    int max_speed = (int)g_movement->get_max_speed() * 0.34f;
-    int speed = (int)raw_speed;
+    // Fetch velocity and calculate raw speed
+    float raw_speed = g_ctx.local->velocity().length(true);
 
-    if (speed <= max_speed)
+    // If speed is already within limit, force to set speed and return
+    if (raw_speed <= max_speed)
     {
-        g_movement->force_speed(g_movement->get_max_speed() * 0.34f);
+        g_movement->force_speed(max_speed);  // Use cached max_speed
         return true;
     }
 
+    // Force stop if speed exceeds limit
     g_movement->force_stop();
 
+    // Return based on quick stop options
     return !(cheat_tools::get_weapon_config().quick_stop_options & 4);
 }
 
@@ -552,136 +562,81 @@ void c_rage_bot::proceed_aimbot()
 {
     const std::unique_lock< std::mutex > lock(mutexes::rage);
 
-#ifdef _DEBUG
-    if (cheat_tools::debug_hitchance)
-    {
-        cheat_tools::spread_point.reset();
-        cheat_tools::current_spread = 0.f;
-        cheat_tools::spread_points.clear();
-    }
-#endif
-
     target = nullptr;
     working = false;
     stopping = false;
     reset_data = false;
     force_accuracy = true;
 
+    // Early return checks
     if (!g_ctx.weapon || interfaces::game_rules->is_freeze_time() || g_ctx.local->flags() & fl_frozen || g_ctx.local->gun_game_immunity())
-    {
         return;
-    }
 
+    // Knife bot check
     this->knife_bot();
 
-    bool invalid_weapon = g_ctx.weapon->is_misc_weapon() && !g_ctx.weapon->is_taser();
-
-    if (!g_cfg.rage.enable || invalid_weapon)
-    {
-        if (reset_scan_data)
-        {
-            for (auto& b : backup)
-                b.reset();
-
-            target = nullptr;
-            reset_scan_data = false;
-        }
-
+    // Invalid weapon check and early return
+    if (!g_cfg.rage.enable || (g_ctx.weapon->is_misc_weapon() && !g_ctx.weapon->is_taser()))
         return;
-    }
-
-    reset_scan_data = true;
 
     float hitchance = std::clamp(cheat_tools::get_weapon_config().hitchance / 100.f, 0.f, 1.f);
-
     auto& players = g_listener_entity->get_entity(ent_player);
     if (players.empty())
         return;
 
-    point_t best_point{ };
-
+    point_t best_point{};
     int index_iter = 0;
+
+    // Threaded point building
     for (auto& player : players)
     {
-        auto entity = (c_csplayer*)player.m_entity;
-        if (!entity)
-            continue;
-
-        if (entity == g_ctx.local || entity->team() == g_ctx.local->team())
+        auto entity = static_cast<c_csplayer*>(player.m_entity);
+        if (!entity || entity == g_ctx.local || entity->team() == g_ctx.local->team())
             continue;
 
         auto& cache = aim_cache[entity->index()];
-
         if (!entity->is_alive() || entity->dormant() || entity->gun_game_immunity())
-        {
-            target = nullptr;
-
-            if (!cache.points.empty())
-                cache.points.clear();
-
-            if (cache.best_point.filled)
-                cache.best_point.reset();
-
-            if (cache.player)
-                cache.player = nullptr;
-
             continue;
-        }
-
-        ++index_iter;
 
         cache.player = entity;
+        ++index_iter;
 
-#ifdef _DEBUG
-        thread_build_points(&cache);
-#else
+        // Parallel point calculation to reduce processing time
         g_thread_pool->enqueue(thread_build_points, &cache);
-#endif
     }
 
     if (index_iter < 1)
         return;
 
-#ifndef _DEBUG
-    g_thread_pool->wait();
-#endif
+    g_thread_pool->wait();  // Ensure all threads finish execution
 
+    // Select the best point to shoot
     for (auto& player : players)
     {
-        auto entity = (c_csplayer*)player.m_entity;
-        if (!entity || entity == g_ctx.local)
-            continue;
-
-        if (entity->team() == g_ctx.local->team() || !entity->is_alive() || entity->dormant() || entity->gun_game_immunity())
+        auto entity = static_cast<c_csplayer*>(player.m_entity);
+        if (!entity || entity == g_ctx.local || entity->team() == g_ctx.local->team() || !entity->is_alive() || entity->dormant() || entity->gun_game_immunity())
             continue;
 
         auto& cache = aim_cache[entity->index()];
         if (!cache.player || cache.player != entity)
             continue;
 
-        thread_get_best_point(&cache);
+        thread_get_best_point(&cache);  // Get best point for each player
     }
 
     int highest_damage = INT_MIN;
 
-    should_slide = false;
-
+    // Find the player with the highest damage potential
     for (auto& player : players)
     {
-        auto entity = (c_csplayer*)player.m_entity;
-        if (!entity || entity == g_ctx.local)
-            continue;
-
-        if (entity->team() == g_ctx.local->team() || !entity->is_alive() || entity->dormant() || entity->gun_game_immunity())
+        auto entity = static_cast<c_csplayer*>(player.m_entity);
+        if (!entity || entity == g_ctx.local || entity->team() == g_ctx.local->team() || !entity->is_alive() || entity->dormant() || entity->gun_game_immunity())
             continue;
 
         auto cache = &aim_cache[entity->index()];
-        if (!cache || !cache->player || cache->player != entity)
-            continue;
-
-        if (!cache->best_point.filled)
+        if (!cache || !cache->player || cache->player != entity || !cache->best_point.filled)
         {
-            this->restore(entity);
+            this->restore(entity);  // Restore the player's state
             continue;
         }
 
@@ -695,76 +650,29 @@ void c_rage_bot::proceed_aimbot()
     if (target)
         best_point = aim_cache[target->index()].best_point;
 
-    if (best_point.filled)
+    // Aim and shoot
+    if (best_point.filled && g_utils->is_able_to_shoot(true))
     {
         working = true;
         stopping = true;
-
         force_scope();
 
-        bool shoot_on_unlag = true;
-        if (!g_cfg.binds[sw_b].toggled && g_cfg.rage.delay_shot && interfaces::client_state->choked_commands > 2)
-            shoot_on_unlag = false;
-
-        if (shoot_on_unlag && force_accuracy && cheat_tools::is_accuracy_valid(target, best_point, hitchance, &best_point.hitchance))
+        if (cheat_tools::is_accuracy_valid(target, best_point, hitchance, &best_point.hitchance))
         {
-            if (g_utils->is_able_to_shoot(true))
-            {
-                if (g_cfg.rage.auto_fire)
-                {
-                    if (!g_anti_aim->is_fake_ducking())
-                    {
-                        if (g_cfg.binds[hs_b].toggled)
-                            *g_ctx.send_packet = true;
-                        else
-                        {
-                            if (!interfaces::client_state->choked_commands)
-                                *g_ctx.send_packet = false;
-                        }
-                    }
+            g_ctx.cmd->buttons |= in_attack;
 
-                    g_ctx.cmd->buttons |= in_attack;
-                }
+            if (g_ctx.lagcomp)
+                g_ctx.cmd->tickcount = math::time_to_ticks(best_point.record->sim_time + g_ctx.lerp_time);
 
-                // interfaces::engine->set_view_angles(g_ctx.cmd->viewangles);
+            g_ctx.cmd->viewangles = math::normalize(math::angle_from_vectors(g_ctx.eye_position, best_point.position), true);
+            g_ctx.cmd->viewangles -= g_ctx.local->aim_punch_angle() * cvars::weapon_recoil_scale->get_float();
 
-                if (g_ctx.cmd->buttons & in_attack)
-                {
-                    firing = true;
-
-                    if (g_ctx.lagcomp)
-                        g_ctx.cmd->tickcount = math::time_to_ticks(best_point.record->sim_time + g_ctx.lerp_time);
-
-                    g_ctx.cmd->viewangles = math::normalize(math::angle_from_vectors(g_ctx.eye_position, best_point.position), true);
-                    g_ctx.cmd->viewangles -= g_ctx.local->aim_punch_angle() * cvars::weapon_recoil_scale->get_float();
-
-                    g_ctx.cmd->viewangles = math::normalize(g_ctx.cmd->viewangles, true);
-
-                    g_ctx.shot_cmd = g_ctx.cmd->command_number;
-                    g_ctx.last_shoot_position = g_ctx.eye_position;
-
-                    if (g_cfg.visuals.chams[c_onshot].enable)
-                        g_chams->add_shot_record(target, best_point.record->sim_orig.bone);
-#ifdef _DEBUG
-#if DEBUG_LC
-                    draw_hitbox(target, best_point.record->sim_orig.bone, 0, 0, false);
-#endif
-
-#if DEBUG_SP
-                    draw_hitbox(target, best_point.record->sim_left.bone, 0, 0, false);
-                    draw_hitbox(target, best_point.record->sim_right.bone, 1, 0, false);
-                    draw_hitbox(target, best_point.record->sim_zero.bone, 0, 1, false);
-#endif
-#endif
-
-                    this->add_shot_record(target, best_point);
-
-                    this->restore(target);
-                }
-            }
+            this->add_shot_record(target, best_point);
+            this->restore(target);  // Restore target's state after firing
         }
     }
 }
+
 
 void c_rage_bot::on_predict_start()
 {
