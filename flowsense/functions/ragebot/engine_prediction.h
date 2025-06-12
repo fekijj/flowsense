@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "../../base/sdk.h"
 
 #include "../../base/tools/math.h"
@@ -72,12 +72,21 @@ private:
             recoil_index = g_ctx.weapon->recoil_index();
             acc_penalty = g_ctx.weapon->accuracy_penalty();
 
-            origin = g_ctx.local->origin();
-            abs_origin = g_ctx.local->get_abs_origin();
-            viewoffset = g_ctx.local->view_offset();
-            aimpunch = g_ctx.local->aim_punch_angle();
-            aimpunch_vel = g_ctx.local->aim_punch_angle_vel();
-            viewpunch = g_ctx.local->view_punch_angle();
+            // origin
+            _mm_storeu_ps(&origin.x, _mm_loadu_ps(&g_ctx.local->origin().x));
+
+            // abs_origin
+            _mm_storeu_ps(&abs_origin.x, _mm_loadu_ps(&g_ctx.local->get_abs_origin().x));
+
+            // viewoffset
+            _mm_storeu_ps(&viewoffset.x, _mm_loadu_ps(&g_ctx.local->view_offset().x));
+
+            // aim_punch
+            _mm_storeu_ps(&aimpunch.x, _mm_loadu_ps(&g_ctx.local->aim_punch_angle().x));
+            _mm_storeu_ps(&aimpunch_vel.x, _mm_loadu_ps(&g_ctx.local->aim_punch_angle_vel().x));
+
+            // viewpunch
+            _mm_storeu_ps(&viewpunch.x, _mm_loadu_ps(&g_ctx.local->view_punch_angle().x));
 
             done = true;
         }
@@ -90,13 +99,30 @@ private:
             g_ctx.weapon->recoil_index() = recoil_index;
             g_ctx.weapon->accuracy_penalty() = acc_penalty;
 
-            g_ctx.local->origin() = origin;
-            g_ctx.local->set_abs_origin(abs_origin);
-            g_ctx.local->view_offset() = viewoffset;
-            g_ctx.local->aim_punch_angle() = aimpunch;
-            g_ctx.local->aim_punch_angle_vel() = aimpunch_vel;
-            g_ctx.local->view_punch_angle() = viewpunch;
+            // SIMD-копирование origin → origin
+            _mm_storeu_ps(&g_ctx.local->origin().x, _mm_loadu_ps(&origin.x));
+
+            // SIMD-копирование abs_origin → set_abs_origin
+            {
+                vector3d tmp;
+                _mm_storeu_ps(&tmp.x, _mm_loadu_ps(&abs_origin.x));
+                g_ctx.local->set_abs_origin(tmp);
+            }
+
+            // viewoffset
+            _mm_storeu_ps(&g_ctx.local->view_offset().x, _mm_loadu_ps(&viewoffset.x));
+
+            // aim_punch
+            _mm_storeu_ps(&g_ctx.local->aim_punch_angle().x, _mm_loadu_ps(&aimpunch.x));
+            _mm_storeu_ps(&g_ctx.local->aim_punch_angle_vel().x, _mm_loadu_ps(&aimpunch_vel.x));
+
+            // viewpunch
+            _mm_storeu_ps(&g_ctx.local->view_punch_angle().x, _mm_loadu_ps(&viewpunch.x));
         }
+
+
+
+
     };
 
     netvars_t unpred_vars[150];
